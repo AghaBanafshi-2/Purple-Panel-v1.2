@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 import qrcode
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from database import SessionLocal, engine, get_db, init_db
@@ -20,17 +21,24 @@ from protocols import PROTOCOLS, ConfigError, build_config, format_bytes, safe_h
 from railway_xray import LOCAL_NODE_MARKER, SUPPORTED_PROTOCOLS, WEBSOCKET_PATHS, runtime
 
 ROOT = Path(__file__).resolve().parent
-logger = logging.getLogger("rix_storm")
-APP_NAME = os.getenv("APP_NAME", "RIX STORM PANEL 2.5")
+logger = logging.getLogger("purple_panel")
+APP_NAME = os.getenv("APP_NAME", "Purple Panel 2.5")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 APP_ENV = os.getenv("APP_ENV", "development").lower()
+
+# پیشوند پنل
+PANEL_PREFIX = os.getenv("PANEL_PREFIX", "/purple").rstrip("/")
+if not PANEL_PREFIX.startswith("/"):
+    PANEL_PREFIX = "/" + PANEL_PREFIX
+
+
 def _load_session_secret() -> str:
     configured = os.getenv("SECRET_KEY", "").strip()
     if configured:
         return configured
     data_dir = Path(os.getenv("DATA_DIR", "/data" if os.getenv("APP_ENV", "development").lower() == "production" else "."))
     data_dir.mkdir(parents=True, exist_ok=True)
-    path = data_dir / ".rix-session-secret"
+    path = data_dir / ".purple-panel-session-secret"
     if not path.exists():
         generated = secrets.token_urlsafe(64).encode("ascii")
         try:
@@ -51,15 +59,17 @@ SESSION_AGE = int(os.getenv("SESSION_MAX_AGE_SECONDS", "28800"))
 templates = Jinja2Templates(directory=str(ROOT))
 _expiry_task: asyncio.Task | None = None
 
+
 async def _expiry_sweeper() -> None:
-    # Disable expired users and rebuild the one local Xray config. Usage is not live-metered yet.
     while True:
         await asyncio.sleep(60)
         with SessionLocal() as db:
             now = utcnow()
-            due = db.scalars(select(Client).where(Client.enabled.is_(True),
+            due = db.scalars(select(Client).where(
+                Client.enabled.is_(True),
                 ((Client.expires_at.is_not(None) & (Client.expires_at <= now)) |
-                 ((Client.quota_bytes > 0) & (Client.used_bytes >= Client.quota_bytes))))).all()
+                 ((Client.quota_bytes > 0) & (Client.used_bytes >= Client.quota_bytes)))
+            )).all()
             if not due:
                 continue
             for client in due:
@@ -76,6 +86,7 @@ async def _expiry_sweeper() -> None:
             except Exception:
                 db.rollback()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _expiry_task
@@ -91,10 +102,16 @@ async def lifespan(app: FastAPI):
             if not db.scalar(select(Admin).where(Admin.username == username)):
                 db.add(Admin(username=username, password_hash=password_hash(password), active=True))
                 db.commit()
-    # Xray is part of this Railway container; no remote VPS or Agent is used.
+
+    # یوزرهای پیش‌فرض فقط در محیط توسعه
+    if APP_ENV != "production":
+        with SessionLocal() as db:
+            for u, p in [("admin", "admin"), ("admin1234567", "admin1234567")]:
+                if not db.scalar(select(Admin).where(Admin.username == u)):
+                    db.add(Admin(username=u, password_hash=password_hash(p), active=True))
+            db.commit()
+
     runtime.start_empty()
-    # Restore saved users immediately after redeploy when Railway's public domain is known.
-    # On custom-domain-only setups, the first authenticated dashboard visit performs this sync.
     if PUBLIC_BASE_URL or os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip():
         try:
             with SessionLocal() as db:
@@ -117,9 +134,46 @@ async def lifespan(app: FastAPI):
         runtime.shutdown()
 
 
-app = FastAPI(title=APP_NAME, docs_url=None if APP_ENV == "production" else "/docs", redoc_url=None, lifespan=lifespan)
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie="rix_storm_session", max_age=SESSION_AGE,
-                   same_site="lax", https_only=APP_ENV == "production")
+app = FastAPI(title=APP_NAME, docs_url=None if APP_ENV == "production" else "/docs",
+              redoc_url=None, lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie="purple_panel_session",
+                   max_age=SESSION_AGE, same_site="lax", https_only=APP_ENV == "production")
+
+
+# ============================================================
+# MIDDLEWARE: مسیرهای قدیمی HTML را به /purple/... منتقل می‌کند
+# ============================================================
+class PanelPrefixMiddleware(BaseHTTPMiddleware):
+    REDIRECT_PATHS = {
+        "/login":   f"{PANEL_PREFIX}/login",
+        "/logout":  f"{PANEL_PREFIX}/logout",
+        "/clients": f"{PANEL_PREFIX}/clients",
+        "/nodes":   f"{PANEL_PREFIX}/nodes",
+    }
+
+    async def dispatch(self, request, call_next):
+        path = request.url.path
+
+        # GET/HEAD → redirect 307
+        if path in self.REDIRECT_PATHS and request.method in ("GET", "HEAD"):
+            return RedirectResponse(self.REDIRECT_PATHS[path], status_code=307)
+
+        # POST → بازنویسی مسیر برای رسیدن به روتر اصلی
+        if path in self.REDIRECT_PATHS and request.method == "POST":
+            request.scope["path"] = self.REDIRECT_PATHS[path]
+
+        # مسیرهای داینامیک /clients/{id}/... را هم به prefix منتقل کن
+        if path.startswith("/clients/") and not path.startswith(f"{PANEL_PREFIX}/"):
+            if request.method == "POST":
+                request.scope["path"] = PANEL_PREFIX + path
+            else:
+                return RedirectResponse(PANEL_PREFIX + path, status_code=307)
+
+        return await call_next(request)
+
+
+app.add_middleware(PanelPrefixMiddleware)
+
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -128,11 +182,17 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    response.headers.setdefault("Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "script-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data: https://fonts.gstatic.com; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
     if request.url.path.startswith(("/s/", "/sub/")):
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
     return response
+
 
 @app.exception_handler(StarletteHTTPException)
 async def friendly_http_error(request: Request, exc: StarletteHTTPException):
@@ -140,24 +200,37 @@ async def friendly_http_error(request: Request, exc: StarletteHTTPException):
         return RedirectResponse(exc.headers["Location"], status_code=exc.status_code)
     if request.url.path.startswith(("/s/", "/sub/")) and exc.status_code in (403, 404, 410):
         safe_detail = html.escape(str(exc.detail))
-        return HTMLResponse(f"<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'><title>اشتراک در دسترس نیست</title><body style='font:16px sans-serif;max-width:620px;margin:10vh auto;padding:24px;background:#111820;color:#edf3f7;border-radius:20px'><h2>این اشتراک در دسترس نیست</h2><p>{safe_detail}</p><a style='color:#85dfb5' href='/'>بازگشت به پنل</a></body></html>", status_code=exc.status_code, headers={"Cache-Control": "no-store"})
+        return HTMLResponse(
+            f"<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'>"
+            f"<title>اشتراک در دسترس نیست</title>"
+            f"<link href='https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap' rel='stylesheet'>"
+            f"<body style='font-family:Vazirmatn,sans-serif;font-size:16px;max-width:620px;margin:10vh auto;"
+            f"padding:24px;background:#120a1f;color:#ede9fe;border-radius:20px;border:1px solid rgba(167,139,250,.25)'>"
+            f"<h2 style='color:#a78bfa'>این اشتراک در دسترس نیست</h2><p>{safe_detail}</p>"
+            f"<a style='color:#8b5cf6' href='{PANEL_PREFIX}/'>بازگشت به پنل</a></body></html>",
+            status_code=exc.status_code, headers={"Cache-Control": "no-store"})
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers or {})
 
+
 @app.get("/health", include_in_schema=False)
 def health():
-    """Platform health probe; no credentials or user details are exposed."""
     state = runtime.status()
-    return {"ok": True, "service": "rix-storm-panel", "version": "2.5",
+    return {"ok": True, "service": "purple-panel", "version": "2.5",
             "xray": state["state"], "configured_users": state["configured_users"]}
+
 
 @app.get("/app.css", include_in_schema=False)
 def css():
-    return FileResponse(ROOT / "app.css", media_type="text/css", headers={"Cache-Control": "public, max-age=300"})
+    return FileResponse(ROOT / "app.css", media_type="text/css",
+                        headers={"Cache-Control": "public, max-age=300"})
+
 
 @app.get("/app.js", include_in_schema=False)
 def javascript():
-    return FileResponse(ROOT / "app.js", media_type="application/javascript", headers={"Cache-Control": "public, max-age=300"})
+    return FileResponse(ROOT / "app.js", media_type="application/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})
+
 
 def _base_url(request: Request | None = None) -> str:
     if PUBLIC_BASE_URL:
@@ -173,6 +246,12 @@ def _base_url(request: Request | None = None) -> str:
     if APP_ENV == "production" and host:
         return "https://" + host
     return str(request.base_url).rstrip("/")
+
+
+def _panel_url(path: str = "/") -> str:
+    if not path.startswith("/"):
+        path = "/" + path
+    return PANEL_PREFIX + path
 
 
 def _railway_host(request: Request | None) -> str:
@@ -196,7 +275,6 @@ def _railway_config_for_client(node: Node, client: Client, credential: str) -> s
 
 
 def _ensure_railway_node(db: Session, request: Request | None) -> Node:
-    """Create/update one hidden local runtime record and migrate prior users to it."""
     host = _railway_host(request)
     node = db.scalar(select(Node).where(Node.agent_url == LOCAL_NODE_MARKER).limit(1))
     if node is None:
@@ -240,7 +318,8 @@ def _ensure_railway_node(db: Session, request: Request | None) -> Node:
             if client.protocol not in SUPPORTED_PROTOCOLS:
                 client.enabled = False
                 client.config_encrypted = encrypt_secret(
-                    "این پروتکل در ورودی HTTP/WebSocket عمومی Railway قابل ارائه نیست. برای جلوگیری از ساخت کانفیگ اشتباه، این حساب غیرفعال شد."
+                    "این پروتکل در ورودی HTTP/WebSocket عمومی Railway قابل ارائه نیست. "
+                    "برای جلوگیری از ساخت کانفیگ اشتباه، این حساب غیرفعال شد."
                 )
                 continue
             try:
@@ -254,7 +333,8 @@ def _ensure_railway_node(db: Session, request: Request | None) -> Node:
             except Exception:
                 client.enabled = False
                 client.config_encrypted = encrypt_secret(
-                    "اطلاعات رمزگذاری‌شدهٔ این کاربر قابل بازخوانی نیست؛ DATA_ENCRYPTION_KEY قبلی را در Railway بازیابی کن."
+                    "اطلاعات رمزگذاری‌شدهٔ این کاربر قابل بازخوانی نیست؛ "
+                    "DATA_ENCRYPTION_KEY قبلی را در Railway بازیابی کن."
                 )
     db.flush()
     return node
@@ -263,18 +343,25 @@ def _ensure_railway_node(db: Session, request: Request | None) -> Node:
 def _flash(request: Request, message: str, kind: str = "success") -> None:
     request.session["flash"] = {"message": message, "kind": kind}
 
+
 def _render(request: Request, template: str, **ctx: Any) -> HTMLResponse:
     flash = request.session.pop("flash", None)
-    context = {"request": request, "app_name": APP_NAME, "csrf": csrf_token(request.session), "flash": flash,
-               "admin": None, "nav": "", "page_title": APP_NAME, "protocols": {p: PROTOCOLS[p] for p in SUPPORTED_PROTOCOLS},
-               "transports": ["ws"], "securities": ["tls"], "ciphers": [],
-               "base_url": _base_url(request)}
+    context = {
+        "request": request, "app_name": APP_NAME, "csrf": csrf_token(request.session), "flash": flash,
+        "admin": None, "nav": "", "page_title": APP_NAME,
+        "protocols": {p: PROTOCOLS[p] for p in SUPPORTED_PROTOCOLS},
+        "transports": ["ws"], "securities": ["tls"], "ciphers": [],
+        "base_url": _base_url(request),
+        "panel_prefix": PANEL_PREFIX,
+    }
     context.update(ctx)
     return templates.TemplateResponse(request=request, name=template, context=context)
+
 
 async def _form(request: Request) -> dict[str, str]:
     form = await request.form()
     return {str(k): str(v) for k, v in form.items()}
+
 
 async def _verify_csrf(request: Request) -> dict[str, str]:
     data = await _form(request)
@@ -283,25 +370,30 @@ async def _verify_csrf(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=403, detail="درخواست نامعتبر یا منقضی شده است؛ صفحه را تازه‌سازی کن.")
     return data
 
+
 def _admin(request: Request, db: Session) -> Admin:
     admin_id = request.session.get("admin_id")
     if not admin_id:
-        raise HTTPException(status_code=303, headers={"Location": "/login"})
+        raise HTTPException(status_code=303, headers={"Location": _panel_url("/login")})
     admin = db.get(Admin, int(admin_id))
     if not admin or not admin.active:
         request.session.clear()
-        raise HTTPException(status_code=303, headers={"Location": "/login"})
+        raise HTTPException(status_code=303, headers={"Location": _panel_url("/login")})
     return admin
 
-def _audit(db: Session, admin: Admin | None, action: str, entity: str, entity_id: object | None, details: str = "") -> None:
+
+def _audit(db: Session, admin: Admin | None, action: str, entity: str,
+           entity_id: object | None, details: str = "") -> None:
     db.add(AuditLog(admin_id=admin.id if admin else None, action=action, entity=entity,
                     entity_id=str(entity_id) if entity_id is not None else None, details=details[:500]))
+
 
 def _required(data: dict[str, str], key: str, label: str, max_len: int = 255) -> str:
     value = data.get(key, "").strip()
     if not value: raise ValueError(f"{label} الزامی است.")
     if len(value) > max_len: raise ValueError(f"{label} بیش از حد طولانی است.")
     return value
+
 
 def _gib_to_bytes(value: str, label: str) -> int:
     try:
@@ -312,11 +404,13 @@ def _gib_to_bytes(value: str, label: str) -> int:
         raise ValueError(f"{label} خارج از محدوده مجاز است.")
     return int(amount * (1024 ** 3))
 
+
 def _next_port(db: Session, node: Node) -> int:
     used = set(db.scalars(select(Client.port).where(Client.node_id == node.id)).all())
     for port in range(node.port_start, node.port_end + 1):
         if port not in used: return port
     raise ValueError("تمام پورت‌های این نود مصرف شده‌اند؛ بازه پورت را بزرگ‌تر کن.")
+
 
 def _client_status(client: Client) -> tuple[str, str]:
     if not client.enabled: return "غیرفعال", "muted"
@@ -324,8 +418,10 @@ def _client_status(client: Client) -> tuple[str, str]:
     if client.quota_bytes and client.used_bytes >= client.quota_bytes: return "حجم تمام‌شده", "danger"
     return "فعال", "success"
 
+
 def _share_url(request: Request, client: Client) -> str:
     return f"{_base_url(request)}/s/{decrypt_secret(client.subscription_token_encrypted)}"
+
 
 def _client_state(client: Client, node: Node) -> dict[str, Any]:
     status, kind = _client_status(client)
@@ -341,7 +437,12 @@ def _client_state(client: Client, node: Node) -> dict[str, Any]:
             "expires_text": client.expires_at.strftime("%Y/%m/%d") if client.expires_at else "بدون انقضا",
             "node_endpoint": f"{node.host}:443"}
 
-@app.get("/", response_class=HTMLResponse)
+
+# ==================== PANEL ROUTER (/purple) ====================
+panel = APIRouter(prefix=PANEL_PREFIX)
+
+
+@panel.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
     admin = _admin(request, db)
     try:
@@ -350,16 +451,17 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         try:
             runtime.sync(db, node.id)
         except RuntimeError:
-            # Render the home page even if Xray reports a deployment/runtime error.
             pass
     except (ValueError, RuntimeError):
         db.rollback()
         node = db.scalar(select(Node).where(Node.agent_url == LOCAL_NODE_MARKER).limit(1))
     total_clients = db.scalar(select(func.count(Client.id))) or 0
     current = utcnow()
-    active = db.scalar(select(func.count(Client.id)).where(Client.enabled.is_(True),
+    active = db.scalar(select(func.count(Client.id)).where(
+        Client.enabled.is_(True),
         ((Client.expires_at.is_(None)) | (Client.expires_at > current)),
-        ((Client.quota_bytes == 0) | (Client.used_bytes < Client.quota_bytes)))) or 0
+        ((Client.quota_bytes == 0) | (Client.used_bytes < Client.quota_bytes))
+    )) or 0
     used = db.scalar(select(func.sum(Client.used_bytes))) or 0
     clients = db.scalars(select(Client).order_by(desc(Client.created_at)).limit(7)).all()
     rows = []
@@ -373,52 +475,55 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     info = {
         "name": "Railway · Xray داخلی",
         "host": node.host if node else (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "دامنهٔ Railway هنوز تعیین نشده"),
-        "url": base_url,
-        "port": "443",
+        "url": base_url, "port": "443",
         "transport": "WebSocket امن (WSS) / TLS لبهٔ Railway",
         "protocols": "VLESS · VMess · Trojan",
-        "status": xray,
-        "storage_path": os.getenv("DATA_DIR", "/data"),
+        "status": xray, "storage_path": os.getenv("DATA_DIR", "/data"),
     }
     return _render(request, "dashboard.html", admin=admin, nav="dashboard", page_title="نمای کلی",
                    client_count=total_clients, active_count=active, node_count=1 if node else 0,
                    used_text=format_bytes(used), clients=rows, server_info=info)
 
-@app.get("/login", response_class=HTMLResponse)
+
+@panel.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    if request.session.get("admin_id"): return RedirectResponse("/", status_code=303)
+    if request.session.get("admin_id"):
+        return RedirectResponse(_panel_url("/"), status_code=303)
     return _render(request, "login.html", hide_shell=True, page_title="ورود مدیر")
 
-@app.post("/login")
+
+@panel.post("/login")
 async def login(request: Request, db: Session = Depends(get_db)):
     data = await _verify_csrf(request)
     username, password = data.get("username", "").strip(), data.get("password", "")
     admin = db.scalar(select(Admin).where(Admin.username == username))
     if not admin or not admin.active or not verify_password(password, admin.password_hash):
         _flash(request, "نام کاربری یا رمز عبور صحیح نیست.", "error")
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse(_panel_url("/login"), status_code=303)
     request.session.clear()
     request.session["admin_id"] = admin.id
     csrf_token(request.session)
     _audit(db, admin, "auth.login", "admin", admin.id, "ورود موفق")
     db.commit()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(_panel_url("/"), status_code=303)
 
-@app.post("/logout")
+
+@panel.post("/logout")
 async def logout(request: Request, db: Session = Depends(get_db)):
     await _verify_csrf(request)
     admin_id = request.session.get("admin_id")
     admin = db.get(Admin, int(admin_id)) if admin_id else None
     if admin: _audit(db, admin, "auth.logout", "admin", admin.id)
     db.commit(); request.session.clear()
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(_panel_url("/login"), status_code=303)
 
-@app.get("/nodes", include_in_schema=False)
+
+@panel.get("/nodes", include_in_schema=False)
 def legacy_nodes_redirect():
-    # Keep old bookmarks working while the node-management UI remains removed.
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(_panel_url("/"), status_code=303)
 
-@app.get("/clients", response_class=HTMLResponse)
+
+@panel.get("/clients", response_class=HTMLResponse)
 def clients_page(request: Request, db: Session = Depends(get_db)):
     admin = _admin(request, db)
     node = _ensure_railway_node(db, request)
@@ -441,12 +546,13 @@ def clients_page(request: Request, db: Session = Depends(get_db)):
     return _render(request, "clients.html", admin=admin, nav="clients", page_title="کاربران و اشتراک‌ها",
                    clients=rows, nodes=[node], protocols={p: PROTOCOLS[p] for p in SUPPORTED_PROTOCOLS})
 
-@app.post("/clients/create")
+
+@panel.post("/clients/create")
 async def client_create(request: Request, db: Session = Depends(get_db)):
     data = await _verify_csrf(request); admin = _admin(request, db)
     try:
         node = _ensure_railway_node(db, request)
-        db.commit()  # Preserve the built-in server record even if a client config fails validation.
+        db.commit()
         node = db.get(Node, node.id)
         name = _required(data, "name", "نام کاربر", 120)
         protocol = data.get("protocol", "vless").strip().lower()
@@ -454,9 +560,9 @@ async def client_create(request: Request, db: Session = Depends(get_db)):
             raise ValueError("در حالت یک‌سرویسی Railway، فقط VLESS، VMess و Trojan از مسیر امن WebSocket پشتیبانی می‌شوند.")
         transport, security, sni = "ws", "tls", node.host
         credential = str(uuid.uuid4()) if protocol in {"vless", "vmess"} else secrets.token_urlsafe(32)
-        email = f"rix-{secrets.token_hex(8)}@rix.local"
-        tag = f"rix-{secrets.token_hex(12)}"
-        port = _next_port(db, node)  # Internal unique ID only; external links use Railway HTTPS port 443.
+        email = f"pp-{secrets.token_hex(8)}@purple.local"
+        tag = f"pp-{secrets.token_hex(12)}"
+        port = _next_port(db, node)
         quota_bytes = _gib_to_bytes(data.get("quota_gb", "0"), "سهمیه (GB)")
         try:
             days = int(data.get("duration_days", "0") or "0")
@@ -488,16 +594,17 @@ async def client_create(request: Request, db: Session = Depends(get_db)):
         db.rollback()
         detail = getattr(exc, "detail", str(exc))
         _flash(request, str(detail), "error")
-    return RedirectResponse("/clients", status_code=303)
+    return RedirectResponse(_panel_url("/clients"), status_code=303)
 
-@app.post("/clients/{client_id}/toggle")
+
+@panel.post("/clients/{client_id}/toggle")
 async def client_toggle(request: Request, client_id: int, db: Session = Depends(get_db)):
     await _verify_csrf(request); admin = _admin(request, db)
-    node = _ensure_railway_node(db, request); db.commit()
+    _ensure_railway_node(db, request); db.commit()
     client = db.get(Client, client_id)
     if not client:
         _flash(request, "کاربر پیدا نشد.", "error")
-        return RedirectResponse("/clients", status_code=303)
+        return RedirectResponse(_panel_url("/clients"), status_code=303)
     node = db.get(Node, client.node_id)
     try:
         if client.enabled:
@@ -519,16 +626,17 @@ async def client_toggle(request: Request, client_id: int, db: Session = Depends(
         db.commit(); _flash(request, message)
     except (RuntimeError, ValueError) as exc:
         db.rollback(); _flash(request, str(exc), "error")
-    return RedirectResponse("/clients", status_code=303)
+    return RedirectResponse(_panel_url("/clients"), status_code=303)
 
-@app.post("/clients/{client_id}/delete")
+
+@panel.post("/clients/{client_id}/delete")
 async def client_delete(request: Request, client_id: int, db: Session = Depends(get_db)):
     await _verify_csrf(request); admin = _admin(request, db)
     _ensure_railway_node(db, request); db.commit()
     client = db.get(Client, client_id)
     if not client:
         _flash(request, "کاربر پیدا نشد.", "error")
-        return RedirectResponse("/clients", status_code=303)
+        return RedirectResponse(_panel_url("/clients"), status_code=303)
     node = db.get(Node, client.node_id)
     try:
         _audit(db, admin, "client.delete", "client", client.id, f"name={client.name}; tag={client.inbound_tag}")
@@ -537,16 +645,17 @@ async def client_delete(request: Request, client_id: int, db: Session = Depends(
         db.commit(); _flash(request, "کاربر از پنل و Xray داخلی حذف شد.")
     except RuntimeError as exc:
         db.rollback(); _flash(request, str(exc), "error")
-    return RedirectResponse("/clients", status_code=303)
+    return RedirectResponse(_panel_url("/clients"), status_code=303)
 
-@app.post("/clients/{client_id}/usage")
+
+@panel.post("/clients/{client_id}/usage")
 async def client_usage(request: Request, client_id: int, db: Session = Depends(get_db)):
     data = await _verify_csrf(request); admin = _admin(request, db)
     _ensure_railway_node(db, request); db.commit()
     client = db.get(Client, client_id)
     if not client:
         _flash(request, "کاربر پیدا نشد.", "error")
-        return RedirectResponse("/clients", status_code=303)
+        return RedirectResponse(_panel_url("/clients"), status_code=303)
     try:
         client.used_bytes = _gib_to_bytes(data.get("used_gb", "0"), "مصرف ثبت‌شده (GB)")
         if client.quota_bytes and client.used_bytes > client.quota_bytes:
@@ -557,11 +666,17 @@ async def client_usage(request: Request, client_id: int, db: Session = Depends(g
                f"used_bytes={client.used_bytes}; enabled={client.enabled}")
         db.flush()
         runtime.sync(db, client.node_id)
-        db.commit(); _flash(request, "مصرف ثبت‌شده ذخیره شد. توجه: این مقدار هنوز دستی است و آمار زنده نیست.", "info")
+        db.commit()
+        _flash(request, "مصرف ثبت‌شده ذخیره شد. توجه: این مقدار هنوز دستی است و آمار زنده نیست.", "info")
     except (ValueError, RuntimeError) as exc:
         db.rollback(); _flash(request, str(exc), "error")
-    return RedirectResponse("/clients", status_code=303)
+    return RedirectResponse(_panel_url("/clients"), status_code=303)
 
+
+app.include_router(panel)
+
+
+# ==================== PUBLIC SUBSCRIPTION (بدون /purple) ====================
 @app.get("/s/{token}", response_class=HTMLResponse)
 def public_subscription(request: Request, token: str, db: Session = Depends(get_db)):
     client = db.scalar(select(Client).where(Client.subscription_token_hash == token_hash(token)))
@@ -570,8 +685,12 @@ def public_subscription(request: Request, token: str, db: Session = Depends(get_
     if not node: raise HTTPException(status_code=404, detail="سرور این اشتراک دیگر در دسترس نیست.")
     state = _client_state(client, node)
     return _render(request, "subscription.html", hide_shell=True, public=True, client=client, node=node, state=state,
-                   page_title="ساب‌پنل اشتراک", token=token, subscription_url=f"{_base_url(request)}/s/{token}",
-                   raw_url=f"{_base_url(request)}/sub/{token}.txt", qr_url=f"/s/{token}/qr.png", download_url=f"/s/{token}/download")
+                   page_title="ساب‌پنل اشتراک", token=token,
+                   subscription_url=f"{_base_url(request)}/s/{token}",
+                   raw_url=f"{_base_url(request)}/sub/{token}.txt",
+                   qr_url=f"/s/{token}/qr.png",
+                   download_url=f"/s/{token}/download")
+
 
 def _public_config(token: str, db: Session) -> tuple[Client, Node, str]:
     client = db.scalar(select(Client).where(Client.subscription_token_hash == token_hash(token)))
@@ -583,18 +702,23 @@ def _public_config(token: str, db: Session) -> tuple[Client, Node, str]:
         raise HTTPException(status_code=410, detail="اشتراک غیرفعال، منقضی یا تمام‌شده است.")
     return client, node, decrypt_secret(client.config_encrypted)
 
+
 @app.get("/sub/{token}.txt")
 def raw_subscription(token: str, db: Session = Depends(get_db)):
     client, _node, config = _public_config(token, db)
     return PlainTextResponse(config + "\n", media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f"inline; filename=rix-{client.id}-subscription.txt", "Cache-Control": "no-store"})
+        headers={"Content-Disposition": f"inline; filename=pp-{client.id}-subscription.txt",
+                 "Cache-Control": "no-store"})
+
 
 @app.get("/s/{token}/download")
 def download_subscription(token: str, db: Session = Depends(get_db)):
     client, _node, config = _public_config(token, db)
     suffix = ".conf" if client.protocol == "wireguard" else ".txt"
     return Response(config + ("" if config.endswith("\n") else "\n"), media_type="text/plain; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="rix-{client.id}-{client.protocol}{suffix}"', "Cache-Control": "no-store"})
+        headers={"Content-Disposition": f'attachment; filename="pp-{client.id}-{client.protocol}{suffix}"',
+                 "Cache-Control": "no-store"})
+
 
 @app.get("/s/{token}/qr.png")
 def qr_code(token: str, db: Session = Depends(get_db)):
@@ -603,3 +727,9 @@ def qr_code(token: str, db: Session = Depends(get_db)):
     image = qrcode.make(config)
     output = io.BytesIO(); image.save(output, format="PNG")
     return Response(output.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+# ریدایرکت ریشه به /purple/
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(_panel_url("/"), status_code=303)
