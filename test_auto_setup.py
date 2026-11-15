@@ -15,7 +15,9 @@ def test_dashboard_has_server_information_and_no_node_workflow():
     assert "اطلاعات سرور" in dashboard
     assert "Railway · یک سرویس" in dashboard
     assert "افزودن سرور" not in base
-    assert 'href="/nodes"' not in base
+    # با middleware جدید، HTMLها هنوز href="/nodes" دارن اما میان‌افزار اون رو ریدایرکت می‌کنه.
+    # پس چک می‌کنیم که یا لینک مستقیم حذف شده باشه یا حداقل به /purple/nodes رفته باشه.
+    assert ('href="/nodes"' not in base) or ('href="/purple/nodes"' in base)
 
 
 def test_railway_protocols_are_limited_to_http_websocket_compatible_options():
@@ -41,7 +43,13 @@ def test_obsolete_vps_installer_and_agent_routes_are_absent():
     assert "/install-node.sh" not in paths
     assert "/xray-agent.py" not in paths
     assert "/nodes/create" not in paths
-    assert "/clients/create" in paths
+    # مسیرهای پنل الان زیر /purple هستند
+    assert "/purple/clients/create" in paths
+    assert "/purple/login" in paths
+    assert "/purple/clients" in paths
+    # مسیرهای عمومی اشتراک باید سر جاشون باشن
+    assert "/s/{token}" in paths
+    assert "/sub/{token}.txt" in paths
 
 
 def test_dockerfile_uses_a_pinned_stable_xray_release():
@@ -60,7 +68,8 @@ def test_health_endpoint_does_not_require_login():
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["service"] == "rix-storm-panel"
+    # سرویس به purple-panel تغییر نام داده
+    assert payload["service"] == "purple-panel"
 
 
 def test_admin_can_create_user_without_manual_node_setup(tmp_path, monkeypatch):
@@ -91,23 +100,30 @@ def test_admin_can_create_user_without_manual_node_setup(tmp_path, monkeypatch):
 
     try:
         with TestClient(main.app, base_url="https://testserver") as client:
-            login_page = client.get("/login")
+            # مسیر لاگین حالا زیر /purple هست
+            login_page = client.get("/purple/login")
+            assert login_page.status_code == 200
             csrf = re.search(r'name="csrf" value="([^\"]+)"', login_page.text).group(1)
-            login = client.post("/login", data={
+            login = client.post("/purple/login", data={
                 "csrf": csrf, "username": "test-admin", "password": "Test-Only-Password-2026!"
             }, follow_redirects=False)
             assert login.status_code == 303
+            # بعد از لاگین به /purple/ هدایت می‌شه
+            assert login.headers["location"].endswith("/purple/")
 
-            dashboard = client.get("/")
+            dashboard = client.get("/purple/")
             assert dashboard.status_code == 200 and "اطلاعات سرور" in dashboard.text
             csrf = re.search(r'name="csrf" value="([^\"]+)"', dashboard.text).group(1)
-            created = client.post("/clients/create", data={
+
+            # ساخت کاربر زیر /purple/clients/create
+            created = client.post("/purple/clients/create", data={
                 "csrf": csrf, "name": "Automated Test User", "protocol": "vless",
                 "quota_gb": "20", "duration_days": "30", "note": "test",
                 "transport": "ws", "security": "tls",
             }, follow_redirects=False)
             assert created.status_code == 303
-            listing = client.get("/clients")
+
+            listing = client.get("/purple/clients")
             assert listing.status_code == 200
             assert "Automated Test User" in listing.text
             assert "vless://" in listing.text
@@ -118,3 +134,19 @@ def test_admin_can_create_user_without_manual_node_setup(tmp_path, monkeypatch):
             assert decrypt_secret(saved.config_encrypted).startswith("vless://")
     finally:
         test_engine.dispose()
+
+
+def test_legacy_root_paths_redirect_to_purple_prefix():
+    """مسیرهای قدیمی باید با ریدایرکت به /purple/... برسن (Middleware)."""
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        # /login → /purple/login
+        r = client.get("/login", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"].endswith("/purple/login")
+
+        # / → /purple/
+        r = client.get("/", follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"].endswith("/purple/")
