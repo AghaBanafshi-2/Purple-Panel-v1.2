@@ -1,12 +1,287 @@
 {% extends "base.html" %}
 {% block standalone %}
-<div class="login-scene"><div class="login-glow"></div><form class="login-card" method="post" action="/login">
-  <div class="brand login-brand"><span class="brand-mark">R</span><span><b>RIX STORM</b><small>SECURE ADMIN ACCESS</small></span></div>
-  <div class="eyebrow">CONTROL CENTER / AUTH</div><h1>خوش برگشتی</h1><p class="muted">برای ورود به پنل مدیریت، اطلاعات مدیر را وارد کن.</p>
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label class="field"><span>نام کاربری</span><input name="username" required autocomplete="username" placeholder="نام کاربری مدیر"></label>
-  <label class="field"><span>رمز عبور</span><input name="password" type="password" required autocomplete="current-password" placeholder="رمز عبور"></label>
-  <button class="button button-primary button-wide" type="submit">ورود امن <span>↗</span></button>
-  <p class="login-note"><span class="online-dot"></span> نشست امن · دسترسی مدیر</p>
-</form></div>
+<style>
+  /* ============================================================
+     Purple Panel · Login Page Theme
+     ساخته شده توسط AghaBanafshi
+     ============================================================ */
+  :root {
+    --pp-purple:       #8b5cf6;
+    --pp-purple-2:     #7c3aed;
+    --pp-purple-dark:  #5b21b6;
+    --pp-purple-light: #a78bfa;
+    --pp-purple-soft:  rgba(139,92,246,.15);
+    --pp-purple-glow:  rgba(139,92,246,.45);
+    --pp-border:       rgba(167,139,250,.25);
+    --pp-text:         #ede9fe;
+    --pp-muted:        #b8a6e6;
+  }
+
+  /* ---------- صحنه لاگین ---------- */
+  .login-scene {
+    min-height: 100vh;
+    background:
+      radial-gradient(900px 500px at 80% -10%, var(--pp-purple-soft), transparent 60%),
+      radial-gradient(700px 500px at -10% 110%, rgba(91,33,182,.25), transparent 60%),
+      #120a1f !important;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  [data-theme="light"] .login-scene {
+    background:
+      radial-gradient(900px 500px at 80% -10%, rgba(139,92,246,.15), transparent 60%),
+      #faf7ff !important;
+  }
+
+  /* هاله نئونی پشت کارت */
+  .login-glow {
+    position: absolute;
+    width: 520px; height: 520px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--pp-purple-glow), transparent 65%);
+    filter: blur(60px);
+    animation: pp-breathe 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes pp-breathe {
+    0%,100% { transform: scale(1);   opacity: .55; }
+    50%     { transform: scale(1.12); opacity: .8; }
+  }
+
+  /* ---------- کارت لاگین ---------- */
+  .login-card {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    background: linear-gradient(180deg, rgba(31,19,56,.92), rgba(18,10,31,.92)) !important;
+    border: 1px solid var(--pp-border) !important;
+    border-radius: 20px !important;
+    padding: 36px 32px !important;
+    box-shadow:
+      0 24px 60px rgba(0,0,0,.55),
+      0 0 0 1px rgba(167,139,250,.1),
+      inset 0 1px 0 rgba(255,255,255,.05) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    animation: pp-rise .55s cubic-bezier(.2,.8,.2,1);
+  }
+  [data-theme="light"] .login-card {
+    background: #fff !important;
+    box-shadow: 0 24px 60px rgba(91,33,182,.15) !important;
+  }
+  @keyframes pp-rise {
+    from { opacity: 0; transform: translateY(18px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* ---------- برند ---------- */
+  .login-brand { margin-bottom: 22px; }
+  .login-brand .brand-mark {
+    background: linear-gradient(135deg, var(--pp-purple), var(--pp-purple-dark)) !important;
+    color: #fff !important;
+    box-shadow: 0 0 0 1px var(--pp-border), 0 8px 24px var(--pp-purple-glow);
+  }
+  .login-brand b { color: var(--pp-text) !important; letter-spacing: .5px; }
+  .login-brand small { color: var(--pp-muted) !important; letter-spacing: 1.2px; }
+
+  .eyebrow { color: var(--pp-purple-light) !important; letter-spacing: 2px; }
+  .login-card h1 {
+    color: var(--pp-text) !important;
+    font-size: 26px !important;
+    margin: 6px 0 8px !important;
+  }
+  .login-card .muted { color: var(--pp-muted) !important; font-size: 13.5px; }
+
+  /* ---------- فیلدها ---------- */
+  .login-card .field { margin-top: 16px; }
+  .login-card .field > span { color: var(--pp-muted) !important; font-weight: 600; }
+  .login-card .field input {
+    width: 100%;
+    background: rgba(13,6,24,.65) !important;
+    border: 1px solid var(--pp-border) !important;
+    color: var(--pp-text) !important;
+    border-radius: 12px !important;
+    padding: 11px 14px !important;
+    transition: border-color .2s, box-shadow .2s, background .2s;
+  }
+  [data-theme="light"] .login-card .field input {
+    background: #fff !important;
+    color: #2a1a4a !important;
+  }
+  .login-card .field input:focus {
+    outline: none !important;
+    border-color: var(--pp-purple) !important;
+    box-shadow: 0 0 0 4px var(--pp-purple-soft) !important;
+    background: rgba(13,6,24,.9) !important;
+  }
+  .login-card .field input::placeholder { color: rgba(184,166,230,.5) !important; }
+
+  /* ---------- دکمه ورود ---------- */
+  .button-primary.button-wide {
+    width: 100%;
+    margin-top: 22px;
+    padding: 12px 18px !important;
+    border-radius: 12px !important;
+    background: linear-gradient(135deg, var(--pp-purple), var(--pp-purple-dark)) !important;
+    color: #fff !important;
+    border: 1px solid transparent !important;
+    font-weight: 700;
+    letter-spacing: .3px;
+    box-shadow: 0 8px 24px var(--pp-purple-glow);
+    transition: transform .15s, box-shadow .2s, filter .2s;
+  }
+  .button-primary.button-wide:hover {
+    box-shadow: 0 12px 32px var(--pp-purple-glow);
+    filter: brightness(1.08);
+  }
+  .button-primary.button-wide:active { transform: translateY(1px); }
+
+  /* ---------- یادداشت پایین ---------- */
+  .login-note {
+    margin-top: 18px;
+    text-align: center;
+    color: var(--pp-muted) !important;
+    font-size: 12.5px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .login-note .online-dot {
+    background: var(--pp-purple) !important;
+    box-shadow: 0 0 0 4px var(--pp-purple-soft), 0 0 10px var(--pp-purple-glow);
+    animation: pp-pulse 2s infinite;
+  }
+  @keyframes pp-pulse {
+    0%,100% { box-shadow: 0 0 0 4px var(--pp-purple-soft), 0 0 10px var(--pp-purple-glow); }
+    50%     { box-shadow: 0 0 0 6px transparent,           0 0 16px var(--pp-purple-glow); }
+  }
+
+  /* ---------- باکس پرکردن سریع ---------- */
+  .quick-fill {
+    margin-top: 18px;
+    padding: 14px;
+    background: var(--pp-purple-soft) !important;
+    border: 1px dashed var(--pp-border) !important;
+    border-radius: 14px !important;
+  }
+  .quick-fill-title {
+    color: var(--pp-purple-light) !important;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .quick-fill-title::before { content: "⚡"; }
+  .quick-fill-btns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .quick-fill-btn {
+    background: rgba(13,6,24,.6) !important;
+    border: 1px solid var(--pp-border) !important;
+    color: var(--pp-purple-light) !important;
+    border-radius: 10px !important;
+    padding: 9px 10px !important;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    font-family: 'Vazirmatn', inherit !important;
+    text-align: center;
+  }
+  [data-theme="light"] .quick-fill-btn {
+    background: #fff !important;
+  }
+  .quick-fill-btn:hover {
+    background: var(--pp-purple) !important;
+    color: #fff !important;
+    border-color: var(--pp-purple) !important;
+    box-shadow: 0 4px 14px var(--pp-purple-glow);
+    transform: translateY(-1px);
+  }
+  .quick-fill-btn:active { transform: translateY(0); }
+  .quick-fill-btn small {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 400;
+    opacity: .75;
+    margin-top: 2px;
+    letter-spacing: 0;
+  }
+
+  /* ---------- انتخاب متن ---------- */
+  ::selection { background: var(--pp-purple-glow); color: #fff; }
+</style>
+
+<div class="login-scene">
+  <div class="login-glow"></div>
+  <form class="login-card" method="post" action="/login" id="loginForm">
+    <div class="brand login-brand">
+      <span class="brand-mark">P</span>
+      <span><b>Purple Panel</b><small>SECURE ADMIN ACCESS</small></span>
+    </div>
+    <div class="eyebrow">CONTROL CENTER / AUTH</div>
+    <h1>خوش برگشتی</h1>
+    <p class="muted">برای ورود به پنل مدیریت، اطلاعات مدیر را وارد کن.</p>
+
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+
+    <label class="field">
+      <span>نام کاربری</span>
+      <input name="username" id="login-username" required autocomplete="username" placeholder="نام کاربری مدیر">
+    </label>
+    <label class="field">
+      <span>رمز عبور</span>
+      <input name="password" id="login-password" type="password" required autocomplete="current-password" placeholder="رمز عبور">
+    </label>
+
+    <button class="button button-primary button-wide" type="submit">ورود امن <span>↗</span></button>
+
+    <!-- ====== پرکردن سریع ====== -->
+    <div class="quick-fill">
+      <div class="quick-fill-title">پرکردن سریع</div>
+      <div class="quick-fill-btns">
+        <button type="button" class="quick-fill-btn" data-fill-user="admin" data-fill-pass="admin">
+          پرکردن سریع ۱
+          <small>admin / admin</small>
+        </button>
+        <button type="button" class="quick-fill-btn" data-fill-user="admin1234567" data-fill-pass="admin1234567">
+          پرکردن سریع ۲
+          <small>admin1234567 / admin1234567</small>
+        </button>
+      </div>
+    </div>
+
+    <p class="login-note"><span class="online-dot"></span> نشست امن · دسترسی مدیر</p>
+  </form>
+</div>
+
+<script>
+  (function () {
+    var form     = document.getElementById('loginForm');
+    var userInp  = document.getElementById('login-username');
+    var passInp  = document.getElementById('login-password');
+    var buttons  = document.querySelectorAll('.quick-fill-btn');
+
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var u = btn.getAttribute('data-fill-user');
+        var p = btn.getAttribute('data-fill-pass');
+        if (userInp) { userInp.value = u; userInp.dispatchEvent(new Event('input', {bubbles:true})); }
+        if (passInp) { passInp.value = p; passInp.dispatchEvent(new Event('input', {bubbles:true})); }
+        // فوکوس روی دکمه ورود برای تجربه بهتر
+        var submit = form && form.querySelector('button[type="submit"]');
+        if (submit) submit.focus();
+      });
+    });
+
+    // اگر خواستی با Enter هم پر شود (اختیاری): Alt+1 / Alt+2
+    document.addEventListener('keydown', function (e) {
+      if (!e.altKey) return;
+      if (e.key === '1' && buttons[0]) { buttons[0].click(); e.preventDefault(); }
+      if (e.key === '2' && buttons[1]) { buttons[1].click(); e.preventDefault(); }
+    });
+  })();
+</script>
 {% endblock %}
