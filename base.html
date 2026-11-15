@@ -2,14 +2,254 @@
 <html lang="fa" dir="rtl" data-theme="dark">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark light"><title>{{ page_title }} · {{ app_name }}</title>
+<meta name="color-scheme" content="dark light">
+<title>{{ page_title }} · {{ app_name }}</title>
+
+<!-- فونت وزیرمتن -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
 <link rel="stylesheet" href="/app.css"><script defer src="/app.js"></script>
+
+<style>
+  /* ============================================================
+     Purple Panel · Theme Layer
+     ساخته شده توسط AghaBanafshi
+     ============================================================ */
+  :root {
+    --pp-purple:        #8b5cf6;
+    --pp-purple-2:      #7c3aed;
+    --pp-purple-dark:   #5b21b6;
+    --pp-purple-light:  #a78bfa;
+    --pp-purple-soft:   rgba(139, 92, 246, .18);
+    --pp-purple-glow:   rgba(139, 92, 246, .45);
+    --pp-bg-dark:       #120a1f;
+    --pp-bg-dark-2:     #1a0f2e;
+    --pp-panel-dark:    #1f1338;
+    --pp-border:        rgba(167, 139, 250, .22);
+    --pp-text:          #ede9fe;
+    --pp-muted:         #b8a6e6;
+    --pp-font:          'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  /* ---------- فونت سراسری ---------- */
+  html, body, button, input, textarea, select, .button, .nav-link,
+  .brand, h1, h2, h3, h4, h5, h6, .eyebrow, .crumb, .footer {
+    font-family: var(--pp-font) !important;
+  }
+
+  /* ---------- پس‌زمینه کلی ---------- */
+  body {
+    background:
+      radial-gradient(1200px 600px at 85% -10%, var(--pp-purple-soft), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(91,33,182,.25), transparent 60%),
+      var(--pp-bg-dark) !important;
+    color: var(--pp-text) !important;
+  }
+  [data-theme="light"] body {
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(139,92,246,.12), transparent 60%),
+      #faf7ff !important;
+    color: #2a1a4a !important;
+  }
+
+  /* ---------- برند ---------- */
+  .brand-mark {
+    background: linear-gradient(135deg, var(--pp-purple), var(--pp-purple-dark)) !important;
+    color: #fff !important;
+    box-shadow: 0 0 0 1px var(--pp-border), 0 8px 24px var(--pp-purple-glow);
+    transition: transform .25s ease, box-shadow .25s ease;
+  }
+  .brand:hover .brand-mark {
+    transform: rotate(-6deg) scale(1.05);
+    box-shadow: 0 0 0 1px var(--pp-purple-light), 0 10px 30px var(--pp-purple-glow);
+  }
+  .brand b { color: var(--pp-text) !important; letter-spacing: .5px; }
+  .brand small { color: var(--pp-muted) !important; letter-spacing: 1px; }
+
+  /* ---------- سایدبار ---------- */
+  .sidebar {
+    background: linear-gradient(180deg, var(--pp-bg-dark-2), #0d0618) !important;
+    border-left: 1px solid var(--pp-border) !important;
+  }
+  [data-theme="light"] .sidebar {
+    background: linear-gradient(180deg, #fff, #f3ecff) !important;
+  }
+  .side-label { color: var(--pp-purple-light) !important; letter-spacing: 2px; }
+
+  .nav-link {
+    color: var(--pp-muted) !important;
+    border-radius: 12px;
+    transition: all .2s ease;
+    position: relative;
+  }
+  .nav-link:hover {
+    color: var(--pp-text) !important;
+    background: var(--pp-purple-soft) !important;
+  }
+  .nav-link.active {
+    color: #fff !important;
+    background: linear-gradient(135deg, var(--pp-purple), var(--pp-purple-dark)) !important;
+    box-shadow: 0 6px 20px var(--pp-purple-glow);
+  }
+  .nav-link.active::before {
+    content: "";
+    position: absolute;
+    right: -2px; top: 20%; bottom: 20%;
+    width: 3px; border-radius: 3px;
+    background: var(--pp-purple-light);
+  }
+
+  .sidebar-bottom {
+    border-top: 1px solid var(--pp-border) !important;
+  }
+  .sidebar-bottom small { color: var(--pp-muted) !important; }
+  .online-dot {
+    background: var(--pp-purple) !important;
+    box-shadow: 0 0 0 4px var(--pp-purple-soft), 0 0 12px var(--pp-purple-glow);
+    animation: pp-pulse 2s infinite;
+  }
+  @keyframes pp-pulse {
+    0%,100% { box-shadow: 0 0 0 4px var(--pp-purple-soft), 0 0 12px var(--pp-purple-glow); }
+    50%     { box-shadow: 0 0 0 6px transparent,     0 0 20px var(--pp-purple-glow); }
+  }
+
+  /* ---------- تاپ‌بار ---------- */
+  .topbar {
+    background: rgba(26,15,46,.65) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--pp-border) !important;
+  }
+  [data-theme="light"] .topbar { background: rgba(255,255,255,.7) !important; }
+  .crumb { color: var(--pp-purple-light) !important; }
+  .topbar b { color: var(--pp-text) !important; }
+
+  /* ---------- دکمه‌ها ---------- */
+  .button {
+    border-radius: 12px !important;
+    transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+    font-weight: 600;
+  }
+  .button:active { transform: translateY(1px); }
+
+  .button-primary {
+    background: linear-gradient(135deg, var(--pp-purple), var(--pp-purple-dark)) !important;
+    border: 1px solid transparent !important;
+    color: #fff !important;
+    box-shadow: 0 6px 18px var(--pp-purple-glow);
+  }
+  .button-primary:hover {
+    box-shadow: 0 10px 26px var(--pp-purple-glow);
+    filter: brightness(1.08);
+  }
+
+  .button-secondary, .button-quiet {
+    background: transparent !important;
+    border: 1px solid var(--pp-border) !important;
+    color: var(--pp-purple-light) !important;
+  }
+  .button-secondary:hover, .button-quiet:hover {
+    background: var(--pp-purple-soft) !important;
+    color: var(--pp-text) !important;
+    border-color: var(--pp-purple-light) !important;
+  }
+
+  .theme-toggle {
+    border: 1px solid var(--pp-border) !important;
+    border-radius: 12px !important;
+    color: var(--pp-purple-light) !important;
+    transition: all .2s ease;
+  }
+  .theme-toggle:hover {
+    background: var(--pp-purple-soft) !important;
+    box-shadow: 0 0 0 3px var(--pp-purple-soft);
+  }
+
+  /* ---------- کارت‌ها و پنل‌ها ---------- */
+  .stat-card, .panel-card, .card {
+    background: linear-gradient(180deg, var(--pp-panel-dark), #170c2a) !important;
+    border: 1px solid var(--pp-border) !important;
+    border-radius: 16px !important;
+    transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+  }
+  [data-theme="light"] .stat-card,
+  [data-theme="light"] .panel-card,
+  [data-theme="light"] .card {
+    background: #fff !important;
+  }
+  .stat-card:hover, .panel-card:hover {
+    border-color: var(--pp-purple-light) !important;
+    box-shadow: 0 10px 30px rgba(139,92,246,.25);
+    transform: translateY(-2px);
+  }
+
+  .stat-icon { color: var(--pp-purple-light) !important; }
+  .stat-icon.green { color: #34d399 !important; }
+  .stat-icon.amber { color: var(--pp-purple) !important; }
+
+  /* ---------- flash ---------- */
+  .flash {
+    border-radius: 12px !important;
+    border: 1px solid var(--pp-border) !important;
+    backdrop-filter: blur(8px);
+  }
+  .flash-success {
+    background: rgba(52,211,153,.12) !important;
+    border-color: rgba(52,211,153,.35) !important;
+    color: #6ee7b7 !important;
+  }
+  .flash-error, .flash-danger {
+    background: rgba(248,113,113,.12) !important;
+    border-color: rgba(248,113,113,.35) !important;
+    color: #fca5a5 !important;
+  }
+
+  /* ---------- فوتر ---------- */
+  .footer {
+    border-top: 1px solid var(--pp-border) !important;
+    color: var(--pp-muted) !important;
+  }
+  .footer .pp-credit {
+    color: var(--pp-purple-light) !important;
+    font-weight: 600;
+    letter-spacing: .3px;
+  }
+  .footer .pp-credit::before {
+    content: "✦ ";
+    color: var(--pp-purple);
+  }
+
+  /* ---------- اسکرول‌بار بنفش ---------- */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(var(--pp-purple), var(--pp-purple-dark));
+    border-radius: 10px;
+    border: 2px solid var(--pp-bg-dark);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--pp-purple-light); }
+
+  /* ---------- انتخاب متن ---------- */
+  ::selection {
+    background: var(--pp-purple-glow);
+    color: #fff;
+  }
+
+  /* ---------- هاله نرم روی محتوا ---------- */
+  .page-content { animation: pp-fade .5s ease; }
+  @keyframes pp-fade {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
 </head>
 <body>
 {% if not hide_shell %}
 <div class="app-shell">
   <aside class="sidebar">
-    <a class="brand" href="/"><span class="brand-mark">R</span><span><b>RIX STORM</b><small>RAILWAY CONTROL 2.5</small></span></a>
+    <a class="brand" href="/"><span class="brand-mark">P</span><span><b>Purple Panel</b><small>RAILWAY CONTROL 2.5</small></span></a>
     <div class="side-label">مدیریت</div>
     <nav class="nav-list">
       <a class="nav-link {% if nav=='dashboard' %}active{% endif %}" href="/"><span>▦</span> خانه و وضعیت سرور</a>
@@ -18,10 +258,10 @@
     <div class="sidebar-bottom"><span class="online-dot"></span><div><b>پنل مدیریت</b><small>{{ admin.username if admin else 'اشتراک خصوصی' }}</small></div></div>
   </aside>
   <main class="main-area">
-    <header class="topbar"><div><span class="crumb">RIX STORM /</span> <b>{{ page_title }}</b></div><div class="top-actions"><button class="theme-toggle" type="button" data-theme-toggle aria-label="تغییر تم">◐ <span>تم</span></button>{% if admin %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button button-quiet" type="submit">خروج ↗</button></form>{% endif %}</div></header>
+    <header class="topbar"><div><span class="crumb">Purple Panel /</span> <b>{{ page_title }}</b></div><div class="top-actions"><button class="theme-toggle" type="button" data-theme-toggle aria-label="تغییر تم">◐ <span>تم</span></button>{% if admin %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="button button-quiet" type="submit">خروج ↗</button></form>{% endif %}</div></header>
     {% if flash %}<div class="flash flash-{{ flash.kind }}" role="status"><span>{{ '✓' if flash.kind=='success' else '!' }}</span>{{ flash.message }}</div>{% endif %}
     <div class="page-content">{% block content %}{% endblock %}</div>
-    <footer class="footer"><span>RIX STORM PANEL 2.5</span><span>یک سرویس Railway · Xray داخلی · بدون ساخت نود</span></footer>
+    <footer class="footer"><span class="pp-credit">Purple Panel · ساخته شده توسط AghaBanafshi</span><span>یک سرویس Railway · Xray داخلی · بدون ساخت نود</span></footer>
   </main>
 </div>
 {% else %}
